@@ -1,0 +1,32 @@
+[package]
+name = "dinopost"
+version = "0.1.0"
+description = "A local-first social publishing agent"
+authors = ["DinoPost"]
+edition = "2021"
+
+[lib]
+name = "dinopost_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["time", "sync", "net", "process"] }
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+keyring = { version = "3", features = ["windows-native"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
