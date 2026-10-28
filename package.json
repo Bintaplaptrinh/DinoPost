@@ -11,6 +11,9 @@
     "desktop": "tauri dev",
     "desktop:build": "tauri build",
     "test": "playwright test",
+    "test:extension": "node --test tests/extension-runtime.unit.mjs && playwright test tests/extension.spec.ts",
+    "test:extension:live": "node scripts/test-extension-live.mjs",
+    "skills:sync": "node scripts/sync-extension-skills.mjs",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "format": "prettier --write src tests *.ts *.json *.md && cargo fmt --manifest-path src-tauri/Cargo.toml"
   },

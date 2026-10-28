@@ -1,0 +1,2 @@
+# Skill integrity hashes refer to upstream bytes, independent of Windows CRLF settings.
+extension/skills/** -text

@@ -1,6 +1,24 @@
 # DinoPost
 
-A Windows desktop publishing assistant built with **Rust, Tauri 2, React and TypeScript**. Discuss a post with MiniMax, review the exact content and Reddit destination, then confirm. JEV chooses browser actions from structured DOM data while Rust drives the installed Google Chrome app.
+A social publishing assistant for Reddit powered by **MiniMax M3.1 Flash AI**. DinoPost supports two deployment modes:
+
+1. **Chrome Extension (Manifest V3 - Recommended)**: Located in [`extension/`](extension/), developed on `develop`. Uses your existing Chrome and Reddit session. MiniMax chats and edits drafts using packaged social-media skills, and can call a separate image-generation tool. This iteration supports one image; login/CAPTCHA and the final Reddit Post click are manual. Reusing a session does not guarantee that Reddit will stop blocking requests.
+2. **Windows Desktop App**: Built with **Rust, Tauri 2, React and TypeScript**. Discuss a post with MiniMax, review the exact content and Reddit destination, then confirm. JEV chooses browser actions from structured DOM data while Rust drives the installed Google Chrome app.
+
+---
+
+## 🌟 Quick Start with Chrome Extension (Recommended)
+
+1. Open Google Chrome and navigate to `chrome://extensions/`.
+2. Enable **Developer mode** (top-right corner).
+3. Click **Load unpacked** (top-left corner) and select the `extension/` folder in this repository.
+4. Pin the **DinoPost AI** extension, configure your NVIDIA API key in **Settings (⚙️)**, and start drafting/posting on Reddit directly!
+
+See [`extension/README.md`](extension/README.md) for full extension documentation.
+
+The sections below describe the legacy Windows desktop app. Its separate Chrome profile, credential store and JEV workflow do not apply to the extension. For the extension pipeline, skills, provider configuration and tests, use the extension guide above.
+
+---
 
 ## Run on Windows
 
@@ -44,11 +62,11 @@ Use **New chat** for a fresh conversation. **Chat history** lists saved conversa
 
 ## Model split
 
-| Component | Responsibility | Input |
-| --- | --- | --- |
-| MiniMax M3.1 Flash | Conversation, recommendations, rewriting | Bounded text history and current draft |
-| JEV (`jev-latest`) | Choose the next allowed form operation | Compact page text, approved content, offered controls, recent actions |
-| Rust executor | Login, Chrome connection, exact field values, guards, submission, verification | Validated typed decisions |
+| Component          | Responsibility                                                                 | Input                                                                 |
+| ------------------ | ------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| MiniMax M3.1 Flash | Conversation, recommendations, rewriting                                       | Bounded text history and current draft                                |
+| JEV (`jev-latest`) | Choose the next allowed form operation                                         | Compact page text, approved content, offered controls, recent actions |
+| Rust executor      | Login, Chrome connection, exact field values, guards, submission, verification | Validated typed decisions                                             |
 
 MiniMax uses `https://integrate.api.nvidia.com/v1/chat/completions` with `minimaxai/minimax-m3.1-flash`, following the supplied guide. JEV uses `https://api.typesafe.ai/v1/systemone`. **There is no screenshot capture or image-model loop.** Rust types the approved title and body directly, without asking another model to regenerate them. JEV cannot supply JavaScript, selectors, coordinates, arbitrary URLs, or shell commands. Its choice and probability distribution are validated against the offered actions. Low-confidence decisions stop the workflow.
 

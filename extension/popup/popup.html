@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DinoPost AI - Reddit Publisher</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- Header -->
+      <header class="app-header">
+        <div class="brand">
+          <span class="logo">🦖</span>
+          <div>
+            <h1>DinoPost AI</h1>
+            <span class="subtitle">Trợ lý Đăng bài Reddit</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button
+            id="btnClearDraft"
+            class="icon-btn"
+            title="Xóa làm mới bản nháp"
+          >
+            🗑️
+          </button>
+          <button id="btnSettings" class="icon-btn" title="Cài đặt API Key">
+            ⚙️
+          </button>
+        </div>
+      </header>
+
+      <!-- Tab status alert -->
+      <div id="tabStatus" class="status-banner">
+        <span id="statusDot" class="dot red"></span>
+        <span id="statusText">Đang kiểm tra tab Reddit...</span>
+        <button id="btnGoSubmit" class="btn-sm hidden">Mở trang Submit</button>
+      </div>
+
+      <!-- AI Generator Section -->
+      <section class="section ai-section">
+        <label class="section-label" for="promptInput"
+          >💡 Chat với Dino AI (MiniMax M3.1 Flash)</label
+        >
+        <div id="chatHistory" class="chat-history" aria-live="polite"></div>
+        <div class="ai-input-group">
+          <textarea
+            id="promptInput"
+            placeholder="Ví dụ: Viết một bài ngắn chia sẻ trải nghiệm làm đồ án AI cho sinh viên..."
+          ></textarea>
+          <button id="btnGenerate" class="btn primary">
+            <span class="btn-text">Gửi cho Dino</span>
+            <span class="spinner hidden"></span>
+          </button>
+        </div>
+        <p class="desc">
+          Yêu cầu Dino viết bài, chỉnh nội dung hoặc tạo một ảnh minh họa ngay
+          trong chat.
+        </p>
+        <button id="btnCancel" type="button" class="btn secondary hidden">
+          Dừng tạo nội dung / ảnh
+        </button>
+        <div id="pipelineStatus" class="pipeline-status" role="status"></div>
+        <div id="aiStatusMessage" class="result-message hidden"></div>
+      </section>
+
+      <!-- Post Draft Section -->
+      <section class="section draft-section">
+        <div class="destination-row">
+          <label for="destinationInput">Nơi đăng:</label>
+          <input
+            type="text"
+            id="destinationInput"
+            value="r/test"
+            placeholder="r/test hoặc u/username"
+          />
+        </div>
+
+        <div class="field-group">
+          <label for="postTitle">Tiêu đề (Title):</label>
+          <input
+            type="text"
+            id="postTitle"
+            maxlength="300"
+            placeholder="Tiêu đề bài viết..."
+          />
+        </div>
+
+        <div class="field-group">
+          <label for="postBody">Nội dung (Body - Tùy chọn):</label>
+          <textarea
+            id="postBody"
+            rows="4"
+            placeholder="Nội dung bài viết..."
+          ></textarea>
+        </div>
+      </section>
+
+      <!-- Media Section (Images & Videos) -->
+      <section class="section media-section">
+        <div class="media-header">
+          <label class="section-label"
+            >🖼️ Ảnh minh họa · phiên thử nghiệm</label
+          >
+          <span id="mediaCount" class="badge-count">0 tệp</span>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="media-actions">
+          <input
+            type="file"
+            id="mediaFileInput"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            class="hidden"
+          />
+          <button
+            id="btnUploadMedia"
+            type="button"
+            class="btn secondary btn-sm-action"
+          >
+            📁 Tải từ máy
+          </button>
+          <button
+            id="btnAiImage"
+            type="button"
+            class="btn primary btn-sm-action"
+            title="Tạo ảnh minh họa bằng AI từ Tiêu đề hoặc Ý tưởng bài viết"
+          >
+            <span class="btn-text">🎨 Dino AI Vẽ ảnh</span>
+            <span class="spinner hidden"></span>
+          </button>
+        </div>
+
+        <!-- Optional custom AI Image prompt input -->
+        <div id="aiPromptRow" class="ai-prompt-row">
+          <input
+            type="text"
+            id="aiImagePromptInput"
+            maxlength="2000"
+            aria-label="Mô tả ảnh"
+            placeholder="Mô tả ảnh (hoặc dùng tiêu đề bài viết)"
+          />
+        </div>
+
+        <!-- Dropzone & Preview Container -->
+        <div id="mediaDropzone" class="media-dropzone">
+          <div id="mediaEmptyNotice" class="media-empty-notice">
+            <span>Kéo & thả một ảnh vào đây hoặc chọn nút phía trên</span>
+            <span class="media-subtext"
+              >PNG, JPG, GIF, WebP · tối đa 4 MiB · tạo video chưa bật</span
+            >
+          </div>
+          <div id="mediaPreviewList" class="media-preview-list hidden"></div>
+        </div>
+        <div id="mediaStatusMessage" class="result-message hidden"></div>
+      </section>
+
+      <!-- Publish Action -->
+      <footer class="app-footer">
+        <p class="desc">
+          Xem lại bản nháp trước khi điền. Đăng nhập và xác minh CAPTCHA trong
+          Chrome. Bạn tự bấm <strong>Post</strong> trên Reddit sau khi kiểm tra.
+        </p>
+
+        <button id="btnPublish" class="btn success btn-block">
+          <span class="btn-text">Điền bản nháp vào Reddit</span>
+          <span class="spinner hidden"></span>
+        </button>
+
+        <div id="resultMessage" class="result-message hidden"></div>
+      </footer>
+
+      <!-- Settings Modal -->
+      <div id="settingsModal" class="modal hidden">
+        <div class="modal-content">
+          <h3>Cấu hình API Key</h3>
+          <p class="desc">Key dùng để gọi MiniMax M3.1 Flash từ NVIDIA NIM:</p>
+          <div class="field-group">
+            <label for="apiKeyInput">NVIDIA API Key:</label>
+            <input type="password" id="apiKeyInput" placeholder="nvapi-..." />
+          </div>
+          <div class="field-group">
+            <label for="brandInput">Hồ sơ thương hiệu (tuỳ chọn):</label
+            ><textarea
+              id="brandInput"
+              maxlength="6000"
+              placeholder="Bạn là ai, người đọc, thông tin đã xác thực, điều cần tránh"
+            ></textarea>
+          </div>
+          <div class="field-group">
+            <label for="voiceInput">Giọng văn / mẫu viết (tuỳ chọn):</label
+            ><textarea
+              id="voiceInput"
+              maxlength="6000"
+              placeholder="Giọng văn bạn muốn dùng và ví dụ thật"
+            ></textarea>
+          </div>
+          <p class="desc">
+            Key lưu trong hồ sơ Chrome, không mã hóa riêng. Nội dung chat gửi
+            NVIDIA; mô tả ảnh gửi Pollinations Classic (miễn phí có hạn mức, có
+            logo). Các URL ảnh được cache; không đưa thông tin riêng tư vào mô
+            tả. Media chỉ gửi Reddit khi bạn bấm điền bản nháp.
+          </p>
+          <div class="modal-actions">
+            <button id="btnSaveSettings" class="btn primary">
+              Lưu cấu hình
+            </button>
+            <button id="btnCloseSettings" class="btn secondary">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
