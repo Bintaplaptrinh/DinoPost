@@ -1,4 +1,4 @@
-// popup/popup.js - Điều khiển giao diện Extension, gọi MiniMax AI và tạo ảnh AI
+// popup/popup.js - Điều khiển giao diện Extension, Side Panel, Background Worker và Tự động lưu bản nháp
 
 const DEFAULT_API_KEY = "";
 const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
@@ -21,6 +21,10 @@ const chkAutoSubmit = document.getElementById("chkAutoSubmit");
 const btnPublish = document.getElementById("btnPublish");
 const resultMessage = document.getElementById("resultMessage");
 
+// Header actions
+const btnClearDraft = document.getElementById("btnClearDraft");
+const btnSettings = document.getElementById("btnSettings");
+
 // Media Elements
 const mediaFileInput = document.getElementById("mediaFileInput");
 const btnUploadMedia = document.getElementById("btnUploadMedia");
@@ -33,51 +37,66 @@ const mediaPreviewList = document.getElementById("mediaPreviewList");
 const mediaCount = document.getElementById("mediaCount");
 const mediaStatusMessage = document.getElementById("mediaStatusMessage");
 
-// Settings Elements
-const btnSettings = document.getElementById("btnSettings");
+// Settings Modal
 const settingsModal = document.getElementById("settingsModal");
 const apiKeyInput = document.getElementById("apiKeyInput");
 const btnSaveSettings = document.getElementById("btnSaveSettings");
 const btnCloseSettings = document.getElementById("btnCloseSettings");
 
 let currentTab = null;
-let attachedMedia = []; // Danh sách: { id, file, name, size, type, isAi, previewUrl }
+let attachedMedia = []; // Danh sách: { id, name, size, type, isAi, base64, previewUrl }
+let saveTimeout = null;
 
-// Khởi chạy khi mở popup
+// =========================================================================
+// Khởi chạy khi mở popup hoặc Side Panel
+// =========================================================================
 document.addEventListener("DOMContentLoaded", async () => {
-  chrome.storage.local.get(["nvidiaApiKey", "savedDestination"], (res) => {
-    const key = res.nvidiaApiKey || DEFAULT_API_KEY;
-    apiKeyInput.value = key;
-    if (res.savedDestination) {
-      destinationInput.value = res.savedDestination;
-    }
-  });
-
+  await restoreDraftAndSettings();
   await checkCurrentTab();
   setupEvents();
   setupMediaEvents();
+  setupStorageListener();
+  setupTabListeners();
 });
+
+// Lắng nghe thay đổi tab đang duyệt để cập nhật banner trạng thái theo thời gian thực
+function setupTabListeners() {
+  if (chrome.tabs && chrome.tabs.onActivated) {
+    chrome.tabs.onActivated.addListener(() => checkCurrentTab());
+  }
+  if (chrome.tabs && chrome.tabs.onUpdated) {
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+      if (currentTab && tabId === currentTab.id && changeInfo.status === "complete") {
+        checkCurrentTab();
+      }
+    });
+  }
+}
 
 // Kiểm tra tab đang mở
 async function checkCurrentTab() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tabs || tabs.length === 0) return;
-  currentTab = tabs[0];
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs || tabs.length === 0) return;
+    currentTab = tabs[0];
 
-  const url = currentTab.url || "";
-  if (!url.includes("reddit.com")) {
-    setStatus("red", "Bạn chưa mở Reddit.", true, "Mở Reddit", () => {
-      chrome.tabs.create({ url: "https://www.reddit.com/r/test/submit" });
-    });
-    return;
-  }
+    const url = currentTab.url || "";
+    if (!url.includes("reddit.com")) {
+      setStatus("red", "Bạn chưa mở Reddit.", true, "Mở Reddit", () => {
+        chrome.tabs.create({ url: "https://www.reddit.com/r/test/submit" });
+      });
+      return;
+    }
 
-  if (url.includes("/submit")) {
-    setStatus("green", "Đang ở trang đăng bài Reddit. Sẵn sàng!", false);
-  } else {
-    setStatus("yellow", "Đang ở Reddit (chưa vào trang tạo bài).", true, "Đến trang Submit", () => {
-      goToSubmitPage();
-    });
+    if (url.includes("/submit")) {
+      setStatus("green", "Đang ở trang đăng bài Reddit. Sẵn sàng!", false);
+    } else {
+      setStatus("yellow", "Đang ở Reddit (chưa vào trang tạo bài).", true, "Đến trang Submit", () => {
+        goToSubmitPage();
+      });
+    }
+  } catch (e) {
+    console.warn("Lỗi kiểm tra tab:", e);
   }
 }
 
@@ -103,11 +122,160 @@ function goToSubmitPage() {
   } else {
     submitUrl = `https://www.reddit.com/r/${dest}/submit`;
   }
-  chrome.tabs.update(currentTab.id, { url: submitUrl });
-  window.close();
+  if (currentTab) {
+    chrome.tabs.update(currentTab.id, { url: submitUrl });
+  } else {
+    chrome.tabs.create({ url: submitUrl });
+  }
+}
+
+// =========================================================================
+// Tự động lưu & Khôi phục Bản nháp (Auto-Save & Restore Draft)
+// =========================================================================
+function debounceSaveDraft() {
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    saveDraftNow();
+  }, 300);
+}
+
+function saveDraftNow() {
+  const draft = {
+    prompt: promptInput.value,
+    destination: destinationInput.value,
+    title: postTitle.value,
+    body: postBody.value,
+    autoSubmit: chkAutoSubmit.checked,
+    attachedMedia: attachedMedia.map(m => ({
+      id: m.id,
+      name: m.name,
+      size: m.size,
+      type: m.type,
+      isAi: m.isAi,
+      base64: m.base64
+    })),
+    updatedAt: Date.now()
+  };
+  chrome.storage.local.set({ dinoDraft: draft });
+}
+
+async function restoreDraftAndSettings() {
+  chrome.storage.local.get(["nvidiaApiKey", "savedDestination", "dinoDraft", "dinoAiTask"], (res) => {
+    // 1. Phục hồi cài đặt API Key & Destination mặc định
+    const key = res.nvidiaApiKey || DEFAULT_API_KEY;
+    apiKeyInput.value = key;
+
+    // 2. Phục hồi toàn bộ nội dung bản nháp nếu có
+    const draft = res.dinoDraft;
+    if (draft) {
+      if (draft.prompt) promptInput.value = draft.prompt;
+      if (draft.destination) destinationInput.value = draft.destination;
+      else if (res.savedDestination) destinationInput.value = res.savedDestination;
+      if (draft.title) postTitle.value = draft.title;
+      if (draft.body) postBody.value = draft.body;
+      if (typeof draft.autoSubmit === "boolean") chkAutoSubmit.checked = draft.autoSubmit;
+
+      if (draft.attachedMedia && Array.isArray(draft.attachedMedia)) {
+        attachedMedia = draft.attachedMedia.map(m => ({
+          ...m,
+          previewUrl: m.base64 // Dùng luôn base64 làm preview không bao giờ bị hỏng url
+        }));
+        renderMediaPreviews();
+      }
+    }
+
+    // 3. Phục hồi trạng thái tác vụ AI đang chạy ngầm nếu có
+    const task = res.dinoAiTask;
+    if (task && (task.status === "generating_text" || task.status === "generating_image")) {
+      // Nếu tác vụ bắt đầu dưới 2 phút trước, khôi phục biểu tượng quay
+      if (Date.now() - (task.startTime || 0) < 120000) {
+        if (task.status === "generating_text") {
+          setLoading(btnGenerate, true);
+          showAIStatus(task.message || "🦖 Dino đang suy nghĩ trong nền...", "loading");
+        } else {
+          setLoading(btnAiImage, true);
+          showMediaStatus(task.message || "🎨 Dino AI đang vẽ ảnh trong nền...", "loading");
+        }
+      }
+    } else if (task && task.status === "success") {
+      if (task.type === "text") showAIStatus(task.message, "success");
+      if (task.type === "image") showMediaStatus(task.message, "success");
+    }
+  });
+}
+
+// Xóa trắng bản nháp
+function clearDraft() {
+  promptInput.value = "";
+  postTitle.value = "";
+  postBody.value = "";
+  attachedMedia = [];
+  renderMediaPreviews();
+  showAIStatus("", "hidden");
+  showMediaStatus("", "hidden");
+  showToast("Đã làm mới bản nháp!", "success");
+
+  chrome.storage.local.remove(["dinoDraft", "dinoAiTask"]);
+}
+
+// Lắng nghe thay đổi storage từ Background Worker để cập nhật giao diện trực tiếp
+function setupStorageListener() {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+
+    if (changes.dinoAiTask) {
+      const task = changes.dinoAiTask.newValue;
+      if (task) {
+        if (task.status === "generating_text") {
+          setLoading(btnGenerate, true);
+          showAIStatus(task.message, "loading");
+        } else if (task.status === "generating_image") {
+          setLoading(btnAiImage, true);
+          showMediaStatus(task.message, "loading");
+        } else if (task.status === "success") {
+          setLoading(btnGenerate, false);
+          setLoading(btnAiImage, false);
+          if (task.type === "text") {
+            showAIStatus(task.message, "success");
+            if (task.data?.title) postTitle.value = task.data.title;
+            if (task.data?.body) postBody.value = task.data.body;
+          }
+          if (task.type === "image") {
+            showMediaStatus(task.message, "success");
+          }
+        } else if (task.status === "error") {
+          setLoading(btnGenerate, false);
+          setLoading(btnAiImage, false);
+          if (task.type === "text") showAIStatus(task.message, "error");
+          if (task.type === "image") showMediaStatus(task.message, "error");
+        }
+      }
+    }
+
+    if (changes.dinoDraft) {
+      const draft = changes.dinoDraft.newValue;
+      if (draft) {
+        if (draft.title && postTitle.value !== draft.title) postTitle.value = draft.title;
+        if (draft.body && postBody.value !== draft.body) postBody.value = draft.body;
+        if (draft.attachedMedia && Array.isArray(draft.attachedMedia)) {
+          if (draft.attachedMedia.length !== attachedMedia.length) {
+            attachedMedia = draft.attachedMedia.map(m => ({
+              ...m,
+              previewUrl: m.base64
+            }));
+            renderMediaPreviews();
+          }
+        }
+      }
+    }
+  });
 }
 
 function setupEvents() {
+  // Nút xóa bản nháp
+  btnClearDraft.onclick = clearDraft;
+
+  // Cài đặt
   btnSettings.onclick = () => settingsModal.classList.remove("hidden");
   btnCloseSettings.onclick = () => settingsModal.classList.add("hidden");
   btnSaveSettings.onclick = () => {
@@ -118,9 +286,15 @@ function setupEvents() {
     });
   };
 
+  // Tự động lưu bản nháp khi gõ
+  promptInput.oninput = debounceSaveDraft;
   destinationInput.oninput = () => {
     chrome.storage.local.set({ savedDestination: destinationInput.value.trim() });
+    debounceSaveDraft();
   };
+  postTitle.oninput = debounceSaveDraft;
+  postBody.oninput = debounceSaveDraft;
+  chkAutoSubmit.onchange = saveDraftNow;
 
   btnGenerate.onclick = handleGenerateAI;
   btnPublish.onclick = handlePublish;
@@ -132,9 +306,9 @@ function setupEvents() {
 function setupMediaEvents() {
   btnUploadMedia.onclick = () => mediaFileInput.click();
 
-  mediaFileInput.onchange = (e) => {
+  mediaFileInput.onchange = async (e) => {
     if (e.target.files && e.target.files.length > 0) {
-      addMediaFiles(e.target.files, false);
+      await addMediaFiles(e.target.files, false);
       mediaFileInput.value = "";
     }
   };
@@ -157,11 +331,11 @@ function setupMediaEvents() {
     mediaDropzone.classList.remove("dragover");
   };
 
-  mediaDropzone.ondrop = (e) => {
+  mediaDropzone.ondrop = async (e) => {
     e.preventDefault();
     mediaDropzone.classList.remove("dragover");
     if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      addMediaFiles(e.dataTransfer.files, false);
+      await addMediaFiles(e.dataTransfer.files, false);
     }
   };
 }
@@ -172,7 +346,7 @@ function formatFileSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-function addMediaFiles(files, isAi = false) {
+async function addMediaFiles(files, isAi = false) {
   if (!files || files.length === 0) return;
   let addedCount = 0;
 
@@ -187,20 +361,26 @@ function addMediaFiles(files, isAi = false) {
       continue;
     }
 
-    const previewUrl = URL.createObjectURL(file);
-    attachedMedia.push({
-      id: "media_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
-      file: file,
-      name: file.name,
-      size: formatFileSize(file.size),
-      type: file.type,
-      isAi: isAi,
-      previewUrl: previewUrl
-    });
-    addedCount++;
+    try {
+      const base64 = await fileToBase64(file);
+      attachedMedia.push({
+        id: "media_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+        name: file.name,
+        size: formatFileSize(file.size),
+        type: file.type,
+        isAi: isAi,
+        base64: base64,
+        previewUrl: base64
+      });
+      addedCount++;
+    } catch (e) {
+      console.warn("Lỗi đọc file:", e);
+    }
   }
 
   renderMediaPreviews();
+  saveDraftNow();
+
   if (addedCount > 0 && !isAi) {
     showMediaStatus(`Đã thêm ${addedCount} tệp thành công!`, "success");
   }
@@ -209,11 +389,9 @@ function addMediaFiles(files, isAi = false) {
 function removeMedia(id) {
   const index = attachedMedia.findIndex(m => m.id === id);
   if (index !== -1) {
-    try {
-      URL.revokeObjectURL(attachedMedia[index].previewUrl);
-    } catch (e) {}
     attachedMedia.splice(index, 1);
     renderMediaPreviews();
+    saveDraftNow();
     showMediaStatus("", "hidden");
   }
 }
@@ -288,7 +466,7 @@ function showMediaStatus(msg, type) {
   mediaStatusMessage.textContent = msg;
 }
 
-// Tạo ảnh minh họa bằng AI qua Pollinations.ai FLUX (hoàn toàn miễn phí, chất lượng cao)
+// Tạo ảnh minh họa bằng AI qua Service Worker (Background)
 async function handleAiImage() {
   const customPrompt = aiImagePromptInput.value.trim();
   const title = postTitle.value.trim();
@@ -304,34 +482,21 @@ async function handleAiImage() {
   }
 
   setLoading(btnAiImage, true);
-  showMediaStatus("🎨 Dino AI đang vẽ ảnh minh họa (khoảng 10-15 giây)...", "loading");
+  showMediaStatus("🎨 Dino AI đang vẽ ảnh trong nền (bạn có thể chuyển tab thoải mái)...", "loading");
 
   try {
-    const enhancedPrompt = `${targetSubject}, vivid digital art, colorful illustration, highly detailed, sharp focus, 4k`;
-    const encoded = encodeURIComponent(enhancedPrompt);
-    const seed = Math.floor(Math.random() * 1000000);
-    const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=768&nologo=true&model=flux&seed=${seed}`;
-
-    const res = await fetch(imageUrl);
-    if (!res.ok) {
-      throw new Error(`Máy chủ tạo ảnh phản hồi HTTP ${res.status}`);
-    }
-
-    const blob = await res.blob();
-    const fileName = `dino-art-${Date.now()}.jpg`;
-    const file = new File([blob], fileName, { type: "image/jpeg", lastModified: Date.now() });
-
-    addMediaFiles([file], true);
-    showMediaStatus("✅ Đã tạo ảnh AI thành công và đính kèm vào bài viết!", "success");
+    chrome.runtime.sendMessage({
+      action: "generateImageInBackground",
+      targetSubject: targetSubject
+    });
     aiPromptRow.classList.add("hidden");
   } catch (err) {
-    showMediaStatus(`Lỗi khi tạo ảnh AI: ${err.message}`, "error");
-  } finally {
+    showMediaStatus(`Lỗi gửi yêu cầu: ${err.message}`, "error");
     setLoading(btnAiImage, false);
   }
 }
 
-// Chuyển File thành Base64 Data URL để truyền qua executeScript
+// Chuyển File thành Base64 Data URL
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -341,7 +506,7 @@ function fileToBase64(file) {
   });
 }
 
-// Gọi MiniMax M3.1 Flash để sinh văn bản bài viết
+// Gọi MiniMax M3.1 Flash qua Service Worker (Background)
 async function handleGenerateAI() {
   const prompt = promptInput.value.trim();
   if (!prompt) {
@@ -349,58 +514,21 @@ async function handleGenerateAI() {
     return;
   }
 
+  saveDraftNow();
   setLoading(btnGenerate, true);
-  showAIStatus("🦖 Dino đang suy nghĩ và viết bài (khoảng 15-25 giây)...", "loading");
+  showAIStatus("🦖 Dino đang viết bài trong nền (bạn có thể chuyển tab thoải mái)...", "loading");
 
   try {
     const res = await chrome.storage.local.get(["nvidiaApiKey"]);
     const apiKey = res.nvidiaApiKey || DEFAULT_API_KEY;
 
-    const systemPrompt = `You are Dino, an expert Reddit social writing assistant. Help draft a compelling Reddit text post based on user prompt.
-You MUST output ONLY a valid JSON object (no markdown code fence, no reasoning outside JSON):
-{
-  "title": "A short, engaging title in Vietnamese (under 150 characters)",
-  "body": "The detailed post content in Vietnamese",
-  "message": "A brief friendly reply to user in Vietnamese"
-}`;
-
-    const response = await fetch(NVIDIA_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: MODEL_NAME,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `Hãy viết bài đăng cho Reddit với chủ đề: ${prompt}` }
-        ],
-        temperature: 0.6,
-        max_tokens: 4096
-      })
+    chrome.runtime.sendMessage({
+      action: "generateTextInBackground",
+      prompt: prompt,
+      apiKey: apiKey
     });
-
-    if (!response.ok) {
-      throw new Error(`Lỗi kết nối AI (HTTP ${response.status}). Vui lòng kiểm tra API Key.`);
-    }
-
-    const data = await response.json();
-    let content = data.choices?.[0]?.message?.content || "";
-    
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Mô hình AI chưa trả về định dạng bài đăng hợp lệ. Vui lòng thử lại!");
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (parsed.title) postTitle.value = parsed.title;
-    if (parsed.body) postBody.value = parsed.body;
-
-    showAIStatus(parsed.message || "✅ Đã tạo tiêu đề & nội dung xong! Hãy xem bên dưới.", "success");
   } catch (err) {
-    showAIStatus(`Không thể tạo bài: ${err.message}`, "error");
-  } finally {
+    showAIStatus(`Không thể gửi yêu cầu: ${err.message}`, "error");
     setLoading(btnGenerate, false);
   }
 }
@@ -483,7 +611,6 @@ async function fillAndPostInPage(title, body, autoSubmit, mediaPayloads = []) {
   await sleep(150);
 
   // 3. TÌM VÀ ĐIỀN Ô NỘI DUNG (Body)
-  // Kích hoạt placeholder nếu ô nội dung đang thu gọn
   const placeholderTarget = all.find(el => {
     if (el === titleEl) return false;
     const ph = (el.getAttribute('placeholder') || el.getAttribute('data-placeholder') || '').toLowerCase();
@@ -605,12 +732,10 @@ async function fillAndPostInPage(title, body, autoSubmit, mediaPayloads = []) {
   }
 
   // 4. ĐÍNH KÈM HÌNH ẢNH & VIDEO (MEDIA) VÀO REDDIT
-  let mediaAttachedCount = 0;
   if (mediaPayloads && mediaPayloads.length > 0) {
     all.length = 0;
     visit(document);
 
-    // Tái tạo các đối tượng File W3C chuẩn từ Base64
     const reconstructedFiles = mediaPayloads.map(p => {
       const commaIdx = p.base64.indexOf(',');
       const b64Data = commaIdx >= 0 ? p.base64.slice(commaIdx + 1) : p.base64;
@@ -627,7 +752,7 @@ async function fillAndPostInPage(title, body, autoSubmit, mediaPayloads = []) {
       dt.items.add(f);
     }
 
-    // Cách 1: Tìm input[type="file"] trong trang / shadow DOM
+    // Cách 1: Gán vào input[type="file"]
     const fileInputs = all.filter(el => {
       if (el.tagName !== 'INPUT' || el.type !== 'file') return false;
       if (el.closest('header, nav, shreddit-user-drawer')) return false;
@@ -640,19 +765,11 @@ async function fillAndPostInPage(title, body, autoSubmit, mediaPayloads = []) {
           fi.files = dt.files;
           fi.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
           fi.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-          mediaAttachedCount = reconstructedFiles.length;
         } catch (e) {}
       }
     }
 
-    // Cách 2: Nếu có nút hình ảnh/video trên thanh công cụ soạn thảo, bấm để kích hoạt file picker ngầm
-    const toolbarMediaBtn = all.find(el => {
-      if (!el.matches('button, [role="button"]')) return false;
-      const aria = (el.getAttribute('aria-label') || el.title || '').toLowerCase();
-      return (aria.includes('ảnh') || aria.includes('image') || aria.includes('media') || aria.includes('video')) && isVisible(el);
-    });
-
-    // Cách 3: Bắn ClipboardEvent paste tệp vào bodyEl
+    // Cách 2: Bắn ClipboardEvent paste tệp vào bodyEl
     if (bodyEl) {
       try {
         bodyEl.focus();
@@ -663,11 +780,10 @@ async function fillAndPostInPage(title, body, autoSubmit, mediaPayloads = []) {
           composed: true
         });
         bodyEl.dispatchEvent(pasteEvt);
-        mediaAttachedCount = reconstructedFiles.length;
       } catch (e) {}
     }
 
-    // Cách 4: Bắn DragEvent drop tệp vào dropzone / bodyEl
+    // Cách 3: Bắn DragEvent drop tệp vào dropzone / bodyEl
     const dropTarget = all.find(el => {
       const txt = (el.innerText || '').toLowerCase();
       return isVisible(el) && (txt.includes('kéo') || txt.includes('drag') || txt.includes('thả'));
@@ -682,7 +798,6 @@ async function fillAndPostInPage(title, body, autoSubmit, mediaPayloads = []) {
           composed: true
         });
         dropTarget.dispatchEvent(dropEvt);
-        mediaAttachedCount = reconstructedFiles.length;
       } catch (e) {}
     }
 
@@ -700,7 +815,6 @@ async function fillAndPostInPage(title, body, autoSubmit, mediaPayloads = []) {
     }
 
     let postBtn = null;
-    // Chờ tối đa 5 giây cho nút Đăng kích hoạt (phòng khi Reddit đang tải tệp media lên)
     for (let wait = 0; wait < 12; wait++) {
       all.length = 0;
       visit(document);
@@ -739,7 +853,7 @@ async function fillAndPostInPage(title, body, autoSubmit, mediaPayloads = []) {
     }
   }
 
-  // Mặc định (khi không chọn tự động bấm Đăng):
+  // Mặc định:
   const mediaNotice = mediaPayloads.length > 0 ? ` và tải lên ${mediaPayloads.length} tệp media` : "";
   return {
     success: true,
@@ -787,23 +901,12 @@ async function handlePublish() {
   showToast("", "hidden");
 
   // Chuẩn bị payload media nếu có
-  let mediaPayloads = [];
-  if (attachedMedia.length > 0) {
-    try {
-      showToast("Đang chuẩn bị ảnh & video đính kèm...", "loading");
-      mediaPayloads = await Promise.all(attachedMedia.map(async item => {
-        const base64 = await fileToBase64(item.file);
-        return {
-          name: item.name,
-          type: item.type,
-          lastModified: item.file.lastModified || Date.now(),
-          base64: base64
-        };
-      }));
-    } catch (e) {
-      console.warn("Không thể mã hóa file media:", e);
-    }
-  }
+  const mediaPayloads = attachedMedia.map(item => ({
+    name: item.name,
+    type: item.type,
+    lastModified: Date.now(),
+    base64: item.base64
+  }));
 
   try {
     let results;
