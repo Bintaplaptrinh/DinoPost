@@ -1,10 +1,16 @@
 // scripts/background.js - Service Worker cấu hình Side Panel cho DinoPost AI
 
 function setupSidePanel() {
+  // Provider keys and drafts must not be readable by Reddit content scripts.
+  chrome.storage.local
+    .setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
+    .catch(console.warn);
   if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((err) => {
-      console.warn("Không thể bật openPanelOnActionClick:", err);
-    });
+    chrome.sidePanel
+      .setPanelBehavior({ openPanelOnActionClick: true })
+      .catch((err) => {
+        console.warn("Không thể bật openPanelOnActionClick:", err);
+      });
   }
 }
 
@@ -20,7 +26,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (chrome.sidePanel && chrome.sidePanel.open) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs && tabs[0]) {
-          chrome.sidePanel.open({ windowId: tabs[0].windowId }).catch((e) => console.warn(e));
+          chrome.sidePanel
+            .open({ windowId: tabs[0].windowId })
+            .catch((e) => console.warn(e));
         }
       });
     }
