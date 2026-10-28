@@ -159,8 +159,16 @@ function saveDraftNow() {
   chrome.storage.local.set({ dinoDraft: draft });
 }
 
+let currentAiController = null;
+let aiTimerInterval = null;
+let currentImageController = null;
+let imageTimerInterval = null;
+
 async function restoreDraftAndSettings() {
-  chrome.storage.local.get(["nvidiaApiKey", "savedDestination", "dinoDraft", "dinoAiTask"], (res) => {
+  // Luôn dọn dẹp trạng thái treo cũ nếu có
+  chrome.storage.local.remove(["dinoAiTask"]);
+
+  chrome.storage.local.get(["nvidiaApiKey", "savedDestination", "dinoDraft"], (res) => {
     // 1. Phục hồi cài đặt API Key & Destination mặc định
     const key = res.nvidiaApiKey || DEFAULT_API_KEY;
     apiKeyInput.value = key;
@@ -178,39 +186,34 @@ async function restoreDraftAndSettings() {
       if (draft.attachedMedia && Array.isArray(draft.attachedMedia)) {
         attachedMedia = draft.attachedMedia.map(m => ({
           ...m,
-          previewUrl: m.base64 // Dùng luôn base64 làm preview không bao giờ bị hỏng url
+          previewUrl: m.base64
         }));
         renderMediaPreviews();
       }
-    }
-
-    // 3. Phục hồi trạng thái tác vụ AI đang chạy ngầm nếu có
-    const task = res.dinoAiTask;
-    if (task && (task.status === "generating_text" || task.status === "generating_image")) {
-      // Nếu tác vụ bắt đầu dưới 2 phút trước, khôi phục biểu tượng quay
-      if (Date.now() - (task.startTime || 0) < 120000) {
-        if (task.status === "generating_text") {
-          setLoading(btnGenerate, true);
-          showAIStatus(task.message || "🦖 Dino đang suy nghĩ trong nền...", "loading");
-        } else {
-          setLoading(btnAiImage, true);
-          showMediaStatus(task.message || "🎨 Dino AI đang vẽ ảnh trong nền...", "loading");
-        }
-      }
-    } else if (task && task.status === "success") {
-      if (task.type === "text") showAIStatus(task.message, "success");
-      if (task.type === "image") showMediaStatus(task.message, "success");
     }
   });
 }
 
 // Xóa trắng bản nháp
 function clearDraft() {
+  if (currentAiController) {
+    currentAiController.abort();
+    currentAiController = null;
+  }
+  if (currentImageController) {
+    currentImageController.abort();
+    currentImageController = null;
+  }
+  clearInterval(aiTimerInterval);
+  clearInterval(imageTimerInterval);
+
   promptInput.value = "";
   postTitle.value = "";
   postBody.value = "";
   attachedMedia = [];
   renderMediaPreviews();
+  setLoading(btnGenerate, false);
+  setLoading(btnAiImage, false);
   showAIStatus("", "hidden");
   showMediaStatus("", "hidden");
   showToast("Đã làm mới bản nháp!", "success");
@@ -466,7 +469,7 @@ function showMediaStatus(msg, type) {
   mediaStatusMessage.textContent = msg;
 }
 
-// Tạo ảnh minh họa bằng AI qua Service Worker (Background)
+// Tạo ảnh minh họa bằng AI qua Pollinations.ai FLUX (trực tiếp trong Side Panel)
 async function handleAiImage() {
   const customPrompt = aiImagePromptInput.value.trim();
   const title = postTitle.value.trim();
@@ -481,18 +484,73 @@ async function handleAiImage() {
     return;
   }
 
+  if (currentImageController) {
+    currentImageController.abort();
+  }
+  currentImageController = new AbortController();
+
   setLoading(btnAiImage, true);
-  showMediaStatus("🎨 Dino AI đang vẽ ảnh trong nền (bạn có thể chuyển tab thoải mái)...", "loading");
+  let elapsedSec = 0;
+  showMediaStatus(`🎨 Dino AI đang vẽ ảnh minh họa... (${elapsedSec}s)`, "loading");
+
+  clearInterval(imageTimerInterval);
+  imageTimerInterval = setInterval(() => {
+    elapsedSec++;
+    showMediaStatus(`🎨 Dino AI đang vẽ ảnh minh họa... (${elapsedSec}s)`, "loading");
+  }, 1000);
 
   try {
-    chrome.runtime.sendMessage({
-      action: "generateImageInBackground",
-      targetSubject: targetSubject
+    const timeoutId = setTimeout(() => {
+      if (currentImageController) currentImageController.abort();
+    }, 60000);
+
+    const enhancedPrompt = `${targetSubject}, vivid digital art, colorful illustration, highly detailed, sharp focus, 4k`;
+    const encoded = encodeURIComponent(enhancedPrompt);
+    const seed = Math.floor(Math.random() * 1000000);
+    const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=768&nologo=true&model=flux&seed=${seed}`;
+
+    const res = await fetch(imageUrl, { signal: currentImageController.signal });
+    clearTimeout(timeoutId);
+    clearInterval(imageTimerInterval);
+
+    if (!res.ok) {
+      throw new Error(`Máy chủ tạo ảnh phản hồi HTTP ${res.status}`);
+    }
+
+    const blob = await res.blob();
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
     });
+
+    const fileName = `dino-art-${Date.now()}.jpg`;
+    attachedMedia.push({
+      id: "media_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+      name: fileName,
+      size: (blob.size / 1024).toFixed(1) + " KB",
+      type: "image/jpeg",
+      isAi: true,
+      base64: base64,
+      previewUrl: base64
+    });
+
+    renderMediaPreviews();
+    saveDraftNow();
+    showMediaStatus(`✅ Đã tạo ảnh AI thành công (${elapsedSec}s)!`, "success");
     aiPromptRow.classList.add("hidden");
   } catch (err) {
-    showMediaStatus(`Lỗi gửi yêu cầu: ${err.message}`, "error");
+    clearInterval(imageTimerInterval);
+    if (err.name === "AbortError") {
+      showMediaStatus("⏱️ Quá thời gian tạo ảnh (60s). Vui lòng thử lại!", "error");
+    } else {
+      showMediaStatus(`Lỗi khi tạo ảnh AI: ${err.message}`, "error");
+    }
+  } finally {
+    clearInterval(imageTimerInterval);
     setLoading(btnAiImage, false);
+    currentImageController = null;
   }
 }
 
@@ -506,7 +564,7 @@ function fileToBase64(file) {
   });
 }
 
-// Gọi MiniMax M3.1 Flash qua Service Worker (Background)
+// Gọi MiniMax M3.1 Flash trực tiếp trong Side Panel (Không bị giới hạn 30s của Service Worker)
 async function handleGenerateAI() {
   const prompt = promptInput.value.trim();
   if (!prompt) {
@@ -514,22 +572,96 @@ async function handleGenerateAI() {
     return;
   }
 
+  if (currentAiController) {
+    currentAiController.abort();
+  }
+  currentAiController = new AbortController();
+
   saveDraftNow();
   setLoading(btnGenerate, true);
-  showAIStatus("🦖 Dino đang viết bài trong nền (bạn có thể chuyển tab thoải mái)...", "loading");
+
+  let elapsedSec = 0;
+  showAIStatus(`🦖 Dino đang suy nghĩ và viết bài... (${elapsedSec}s)`, "loading");
+
+  clearInterval(aiTimerInterval);
+  aiTimerInterval = setInterval(() => {
+    elapsedSec++;
+    showAIStatus(`🦖 Dino đang suy nghĩ và viết bài... (${elapsedSec}s)`, "loading");
+  }, 1000);
 
   try {
     const res = await chrome.storage.local.get(["nvidiaApiKey"]);
     const apiKey = res.nvidiaApiKey || DEFAULT_API_KEY;
 
-    chrome.runtime.sendMessage({
-      action: "generateTextInBackground",
-      prompt: prompt,
-      apiKey: apiKey
+    // Timeout an toàn 75s (phòng khi NVIDIA bận)
+    const timeoutId = setTimeout(() => {
+      if (currentAiController) currentAiController.abort();
+    }, 75000);
+
+    const systemPrompt = `You are Dino, an expert Reddit social writing assistant. Help draft a compelling Reddit text post based on user prompt.
+You MUST output ONLY a valid JSON object (no markdown code fence, no reasoning outside JSON):
+{
+  "title": "A short, engaging title in Vietnamese (under 150 characters)",
+  "body": "The detailed post content in Vietnamese",
+  "message": "A brief friendly reply to user in Vietnamese"
+}`;
+
+    const response = await fetch(NVIDIA_URL, {
+      method: "POST",
+      signal: currentAiController.signal,
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: MODEL_NAME,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `Hãy viết bài đăng cho Reddit với chủ đề: ${prompt}` }
+        ],
+        temperature: 0.6,
+        max_tokens: 2048
+      })
     });
+
+    clearTimeout(timeoutId);
+    clearInterval(aiTimerInterval);
+
+    if (!response.ok) {
+      throw new Error(`Lỗi kết nối AI (HTTP ${response.status}). Vui lòng kiểm tra API Key.`);
+    }
+
+    const data = await response.json();
+    
+    // Đọc kết quả từ content hoặc reasoning_content nếu là mô hình tư duy
+    let content = data.choices?.[0]?.message?.content || "";
+    if (!content || !content.includes("{")) {
+      content = data.choices?.[0]?.message?.reasoning_content || "";
+    }
+
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Mô hình AI chưa trả về định dạng bài đăng hợp lệ. Vui lòng thử lại!");
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (parsed.title) postTitle.value = parsed.title;
+    if (parsed.body) postBody.value = parsed.body;
+    saveDraftNow();
+
+    showAIStatus(parsed.message || `✅ Đã tạo xong sau ${elapsedSec}s! Hãy xem bên dưới.`, "success");
+
   } catch (err) {
-    showAIStatus(`Không thể gửi yêu cầu: ${err.message}`, "error");
+    clearInterval(aiTimerInterval);
+    if (err.name === "AbortError") {
+      showAIStatus("⏱️ Quá thời gian chờ (75s). Máy chủ AI đang quá tải, bạn vui lòng thử lại nhé!", "error");
+    } else {
+      showAIStatus(`Không thể tạo bài: ${err.message}`, "error");
+    }
+  } finally {
+    clearInterval(aiTimerInterval);
     setLoading(btnGenerate, false);
+    currentAiController = null;
   }
 }
 
