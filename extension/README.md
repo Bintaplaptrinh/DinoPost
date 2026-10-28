@@ -7,6 +7,8 @@
 ---
 
 ## 1. Điểm nổi bật so với kiến trúc cũ
+* **Chế độ Bảng bên (Side Panel)**: Tiện ích mở cố định ở cạnh phải màn hình Chrome, **không bao giờ bị tắt khi bấm chuột ra ngoài** hay chuyển tab.
+* **Tự động lưu bản nháp (Draft Persistence)**: Toàn bộ nội dung tiêu đề, thân bài và các file ảnh/video tải lên đều được tự động lưu theo thời gian thực. Mở lại trình duyệt bất kỳ lúc nào bài viết vẫn còn nguyên vẹn.
 * **Không cần mở Chrome phụ**: Tận dụng 100% phiên đăng nhập tài khoản Reddit có sẵn trên trình duyệt bạn đang dùng hàng ngày.
 * **Không sợ chặn mạng**: Kế thừa trực tiếp cấu hình mạng, DNS và Cloudflare WARP (1.1.1.1) của máy.
 * **Hỗ trợ Ảnh & Video đa năng**:
