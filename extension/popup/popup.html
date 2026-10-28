@@ -58,6 +58,41 @@
       </div>
     </section>
 
+    <!-- Media Section (Images & Videos) -->
+    <section class="section media-section">
+      <div class="media-header">
+        <label class="section-label">🖼️ Hình ảnh & Video</label>
+        <span id="mediaCount" class="badge-count">0 tệp</span>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="media-actions">
+        <input type="file" id="mediaFileInput" accept="image/*,video/*" multiple class="hidden">
+        <button id="btnUploadMedia" type="button" class="btn secondary btn-sm-action">
+          📁 Tải từ máy
+        </button>
+        <button id="btnAiImage" type="button" class="btn primary btn-sm-action" title="Tạo ảnh minh họa bằng AI từ Tiêu đề hoặc Ý tưởng bài viết">
+          <span class="btn-text">🎨 Dino AI Vẽ ảnh</span>
+          <span class="spinner hidden"></span>
+        </button>
+      </div>
+
+      <!-- Optional custom AI Image prompt input -->
+      <div id="aiPromptRow" class="ai-prompt-row hidden">
+        <input type="text" id="aiImagePromptInput" placeholder="Mô tả ảnh muốn vẽ (hoặc bấm để AI vẽ theo bài viết)...">
+      </div>
+
+      <!-- Dropzone & Preview Container -->
+      <div id="mediaDropzone" class="media-dropzone">
+        <div id="mediaEmptyNotice" class="media-empty-notice">
+          <span>Kéo & thả ảnh / video vào đây hoặc chọn nút phía trên</span>
+          <span class="media-subtext">Hỗ trợ PNG, JPG, GIF, MP4, WebM (tự động đính kèm vào Reddit)</span>
+        </div>
+        <div id="mediaPreviewList" class="media-preview-list hidden"></div>
+      </div>
+      <div id="mediaStatusMessage" class="result-message hidden"></div>
+    </section>
+
     <!-- Publish Action -->
     <footer class="app-footer">
       <label class="checkbox-label">

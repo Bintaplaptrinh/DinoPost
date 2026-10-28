@@ -2,7 +2,7 @@
 
 A social publishing assistant for Reddit powered by **MiniMax M3.1 Flash AI**. DinoPost supports two deployment modes:
 
-1. **Chrome Extension (Manifest V3 - Recommended)**: Located in [`extension/`](extension/). Runs directly inside your daily, active Google Chrome browser window. Bypasses separate profile restrictions, works seamlessly with Cloudflare WARP / local network setups, and automates Reddit post drafting and publishing with full Title and Body support.
+1. **Chrome Extension (Manifest V3 - Recommended)**: Located in [`extension/`](extension/). Runs directly inside your daily, active Google Chrome browser window. Bypasses separate profile restrictions, works seamlessly with Cloudflare WARP / local network setups, and automates Reddit post drafting and publishing with full Title, Body, Local Images/Videos, and AI Image Generation support.
 2. **Windows Desktop App**: Built with **Rust, Tauri 2, React and TypeScript**. Discuss a post with MiniMax, review the exact content and Reddit destination, then confirm. JEV chooses browser actions from structured DOM data while Rust drives the installed Google Chrome app.
 
 ---

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DinoPost AI - Trợ lý Đăng bài Reddit",
-  "version": "1.0.0",
-  "description": "Trợ lý AI tự động soạn thảo và đăng bài Reddit cho đồ án Chuyên đề Trí tuệ Nhân tạo.",
+  "version": "1.1.0",
+  "description": "Trợ lý AI tự động soạn thảo, tạo ảnh AI và đăng bài kèm media trên Reddit.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -11,7 +11,8 @@
   ],
   "host_permissions": [
     "https://*.reddit.com/*",
-    "https://integrate.api.nvidia.com/*"
+    "https://integrate.api.nvidia.com/*",
+    "https://image.pollinations.ai/*"
   ],
   "action": {
     "default_popup": "popup/popup.html",
